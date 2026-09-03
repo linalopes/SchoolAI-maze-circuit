@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Flap Bird — Easy</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a0a2e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    width: 100vw;
+    font-family: 'Press Start 2P', monospace;
+    overflow: hidden;
+  }
+  #game-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+  }
+  #score-bar {
+    display: flex;
+    justify-content: space-between;
+    color: #ffe066;
+    font-size: 11px;
+    text-shadow: 0 0 8px #ffaa00;
+    letter-spacing: 1px;
+  }
+  canvas {
+    display: block;
+    border: 3px solid #7b2fff;
+    border-radius: 6px;
+    box-shadow: 0 0 40px #7b2fff88, 0 0 80px #7b2fff33;
+  }
+  #hint {
+    color: #a87fff;
+    font-size: 8px;
+    letter-spacing: 2px;
+    opacity: 0.8;
+    text-shadow: 0 0 6px #7b2fff;
+  }
+</style>
+</head>
+<body>
+<div id="game-wrapper">
+  <div id="score-bar">
+    <span>SCORE: <span id="score">0</span></span>
+    <span style="margin-left:32px">BEST: <span id="best">0</span></span>
+  </div>
+  <canvas id="c"></canvas>
+  <div id="hint">SPACE to flap · R to restart</div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const bestEl  = document.getElementById('best');
+const scorebar = document.getElementById('score-bar');
+
+// ── responsive landscape ──────────────────────────────────
+function resize() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const hintH = 30, barH = 28, gap = 20;
+  const availH = vh - hintH - barH - gap * 3;
+  const availW = vw * 0.96;
+
+  // landscape 16:9
+  let cw = availW;
+  let ch = Math.round(cw * 9 / 16);
+  if (ch > availH) { ch = availH; cw = Math.round(ch * 16 / 9); }
+
+  canvas.width  = cw;
+  canvas.height = ch;
+  scorebar.style.width = cw + 'px';
+}
+resize();
+window.addEventListener('resize', () => { resize(); initGame(); });
+
+const cw = () => canvas.width;
+const ch = () => canvas.height;
+
+// ── stars ─────────────────────────────────────────────────
+let stars = [];
+function buildStars() {
+  stars = Array.from({length: 130}, () => ({
+    x: Math.random() * cw(),
+    y: Math.random() * ch() * 0.78,
+    r: Math.random() * 1.5 + 0.3,
+    alpha: Math.random() * 0.6 + 0.2,
+    twinkle: Math.random() * Math.PI * 2
+  }));
+}
+buildStars();
+
+// ── state ────────────────────────────────────────────────
+let state, bird, pipes, score, best, frame, deathTimer, pipeTimer;
+best = 0;
+
+function initGame() {
+  buildStars();
+  bird = { x: cw() * 0.14, y: ch() / 2, vy: 0, angle: 0, wingPhase: 0, squish: 1 };
+  pipes = [];
+  score = 0;
+  frame = 0;
+  deathTimer = 0;
+  pipeTimer = 0;
+  scoreEl.textContent = 0;
+  state = 'idle';
+}
+initGame();
+
+// ── physics (scale with canvas) ───────────────────────────
+const GRAVITY     = 0.18;
+const MAX_FALL    = 6.5;
+const flapForce   = () => -Math.sqrt(ch()) * 0.21;
+const pipeW       = () => Math.round(cw() * 0.052);
+const gap         = () => Math.round(ch() * 0.50);   // 50% altura — ENORME
+const pipeSpeed   = () => cw() * 0.0018;
+const birdR       = () => Math.round(ch() * 0.048);
+const pipeEvery   = () => Math.round(cw() * 0.42);   // muito espaçado
+const groundY     = () => ch() - Math.round(ch() * 0.055);
+
+// ── input ─────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); flap(); }
+  if (e.code === 'KeyR')  { initGame(); }
+});
+canvas.addEventListener('pointerdown', () => flap());
+
+function flap() {
+  if (state === 'dead') return;
+  if (state === 'idle') state = 'playing';
+  bird.vy = flapForce();
+  bird.squish = 0.72;
+}
+
+// ── pipes ─────────────────────────────────────────────────
+function spawnPipe() {
+  const g = gap(), gy = groundY();
+  const minTop = ch() * 0.10;
+  const maxTop = gy - g - ch() * 0.10;
+  const top = Math.random() * (maxTop - minTop) + minTop;
+  pipes.push({ x: cw() + pipeW(), top, scored: false });
+}
+
+function hitsPipe(b, p) {
+  const br = birdR() - 4;
+  const pw = pipeW(), g = gap();
+  if (b.x + br > p.x && b.x - br < p.x + pw) {
+    if (b.y - br < p.top)      return true;
+    if (b.y + br > p.top + g)  return true;
+  }
+  return false;
+}
+
+// ── draw ──────────────────────────────────────────────────
+function drawSky() {
+  const grad = ctx.createLinearGradient(0, 0, 0, ch());
+  grad.addColorStop(0, '#0d0628');
+  grad.addColorStop(1, '#1a1040');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, cw(), ch());
+}
+
+function drawStars() {
+  stars.forEach(s => {
+    s.twinkle += 0.025;
+    ctx.globalAlpha = s.alpha * (0.7 + 0.3 * Math.sin(s.twinkle));
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawGround() {
+  const gy = groundY();
+  ctx.save();
+  ctx.shadowColor = '#2eff9e'; ctx.shadowBlur = 12;
+  ctx.strokeStyle = '#2eff9e'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(cw(), gy); ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = '#0a0520';
+  ctx.fillRect(0, gy + 1, cw(), ch() - gy);
+  ctx.strokeStyle = '#2eff9e1a'; ctx.lineWidth = 1;
+  for (let i = 0; i < cw(); i += 30) {
+    ctx.beginPath(); ctx.moveTo(i, gy); ctx.lineTo(i, ch()); ctx.stroke();
+  }
+}
+
+function drawPipe(p) {
+  const pw = pipeW(), g = gap(), gy = groundY();
+  const capH = Math.round(ch() * 0.028), capE = 7;
+  ctx.save();
+  ctx.shadowColor = '#2eff9e'; ctx.shadowBlur = 16;
+  ctx.fillStyle = '#2eff9e';
+  ctx.fillRect(p.x, 0, pw, p.top);
+  ctx.fillRect(p.x, p.top + g, pw, gy - (p.top + g));
+  ctx.fillStyle = '#00cc6a';
+  ctx.fillRect(p.x - capE/2, p.top - capH, pw + capE, capH);
+  ctx.fillRect(p.x - capE/2, p.top + g,    pw + capE, capH);
+  ctx.fillStyle = 'rgba(255,255,255,0.07)';
+  ctx.fillRect(p.x + 5, 0, 7, Math.max(0, p.top - capH));
+  ctx.fillRect(p.x + 5, p.top + g + capH, 7, gy);
+  ctx.restore();
+}
+
+function drawBird(b) {
+  const r = birdR();
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.rotate(b.angle);
+  ctx.scale(1, b.squish);
+
+  ctx.save();
+  ctx.shadowColor = '#ffe066'; ctx.shadowBlur = 20;
+  b.wingPhase += 0.2;
+  const wy = Math.sin(b.wingPhase) * r * 0.28;
+  ctx.fillStyle = '#ffaa00';
+  ctx.beginPath();
+  ctx.ellipse(-r * 0.22, wy + r * 0.1, r * 0.72, r * 0.42, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffe066';
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(r * 0.44, -r * 0.3, r * 0.36, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#1a0a2e';
+  ctx.beginPath(); ctx.arc(r * 0.5, -r * 0.3, r * 0.18, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ff7b3a';
+  ctx.beginPath();
+  ctx.moveTo(r * 0.88, -r * 0.1);
+  ctx.lineTo(r * 1.4,  r * 0.06);
+  ctx.lineTo(r * 0.88, r * 0.24);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function txt(str, size, color, glow, x, y, align='center') {
+  ctx.save();
+  ctx.font = `${Math.round(size)}px "Press Start 2P"`;
+  ctx.textAlign = align;
+  ctx.fillStyle = color;
+  ctx.shadowColor = glow;
+  ctx.shadowBlur = 14;
+  ctx.fillText(str, x, y);
+  ctx.restore();
+}
+
+function drawHUD() {
+  txt(score, ch() * 0.06, '#ffe066', '#ffaa00', cw() / 2, ch() * 0.1);
+}
+
+function drawIdle() {
+  const pulse = 0.92 + 0.08 * Math.sin(frame * 0.05);
+  txt('FLAP BIRD', ch() * 0.08 * pulse, '#ffe066', '#ffaa00', cw()/2, ch()/2 - ch()*0.12);
+  txt('✦  EASY MODE  ✦', ch() * 0.032, '#2eff9e', '#2eff9e', cw()/2, ch()/2 + ch()*0.01);
+  txt('PRESS SPACE TO START', ch() * 0.03, '#a87fff', '#7b2fff', cw()/2, ch()/2 + ch()*0.1);
+}
+
+function drawDead() {
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, deathTimer / 30);
+  txt('GAME OVER', ch() * 0.075, '#ff4466', '#ff0033', cw()/2, ch()/2 - ch()*0.12);
+  txt('SCORE: ' + score, ch() * 0.035, '#ffe066', '#ffaa00', cw()/2, ch()/2 + ch()*0.02);
+  if (score >= best && score > 0)
+    txt('NEW BEST!', ch() * 0.032, '#2eff9e', '#2eff9e', cw()/2, ch()/2 + ch()*0.1);
+  txt('R = RESTART', ch() * 0.026, '#a87fff', '#7b2fff', cw()/2, ch()/2 + ch()*0.2);
+  ctx.restore();
+}
+
+// ── loop ──────────────────────────────────────────────────
+function loop() {
+  requestAnimationFrame(loop);
+  frame++;
+
+  const gy = groundY();
+  const br = birdR();
+
+  if (state === 'playing') {
+    bird.vy = Math.min(bird.vy + GRAVITY, MAX_FALL);
+    bird.y  += bird.vy;
+    bird.angle = Math.max(-0.45, Math.min(Math.PI / 2.5, bird.vy * 0.08));
+    bird.squish += (1 - bird.squish) * 0.12;
+
+    pipeTimer++;
+    if (pipeTimer >= pipeEvery()) { pipeTimer = 0; spawnPipe(); }
+
+    const ps = pipeSpeed(), pw = pipeW();
+    for (const p of pipes) {
+      p.x -= ps;
+      if (!p.scored && p.x + pw < bird.x) {
+        p.scored = true; score++; scoreEl.textContent = score;
+      }
+    }
+    pipes = pipes.filter(p => p.x > -pw - 20);
+
+    if (bird.y + br >= gy || bird.y - br <= 0) {
+      state = 'dead';
+      if (score > best) { best = score; bestEl.textContent = best; }
+    }
+    for (const p of pipes) {
+      if (hitsPipe(bird, p)) {
+        state = 'dead';
+        if (score > best) { best = score; bestEl.textContent = best; }
+        break;
+      }
+    }
+  }
+
+  if (state === 'idle') {
+    bird.y = ch() / 2 + Math.sin(frame * 0.04) * 10;
+    bird.angle = Math.sin(frame * 0.04) * 0.12;
+    bird.wingPhase += 0.15;
+  }
+
+  if (state === 'dead') {
+    deathTimer++;
+    bird.vy = Math.min(bird.vy + GRAVITY, MAX_FALL);
+    bird.y  = Math.min(bird.y + bird.vy, gy - br);
+    bird.angle = Math.min(bird.angle + 0.055, Math.PI / 2.2);
+  }
+
+  drawSky();
+  drawStars();
+  for (const p of pipes) drawPipe(p);
+  drawGround();
+  drawBird(bird);
+  if (state !== 'dead') drawHUD();
+  if (state === 'idle')  drawIdle();
+  if (state === 'dead')  drawDead();
+}
+
+loop();
+</script>
+</body>
+</html>

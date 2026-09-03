@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Piano Keyboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    min-height: 100vh;
+    background: #0d0d0d;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Courier New', monospace;
+    color: #eee;
+    gap: 2rem;
+  }
+
+  h1 {
+    font-size: 13px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #666;
+    font-weight: 400;
+  }
+
+  .note-display {
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    min-height: 60px;
+    color: #fff;
+    text-align: center;
+    transition: opacity 0.2s;
+  }
+
+  .piano-wrap {
+    position: relative;
+    display: inline-block;
+    border: 1.5px solid #333;
+    border-radius: 6px;
+    overflow: visible;
+    padding: 0 12px 12px;
+    background: #1a1a1a;
+  }
+
+  .white-keys {
+    display: flex;
+    gap: 3px;
+    padding-top: 12px;
+  }
+
+  .key {
+    width: 70px;
+    height: 180px;
+    background: #f5f0e8;
+    border: 1.5px solid #999;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    padding-bottom: 14px;
+    cursor: pointer;
+    transition: background 0.07s;
+    position: relative;
+    user-select: none;
+  }
+
+  .key:hover { background: #e8e3da; }
+  .key.active { background: #aac4f0 !important; }
+
+  .key.black {
+    background: #111;
+    width: 50px;
+    height: 108px;
+    border-radius: 0 0 5px 5px;
+    border: 1.5px solid #000;
+    margin: 0 -25px;
+    z-index: 2;
+    padding-bottom: 0;
+  }
+  .key.black:hover { background: #222; }
+  .key.black.active { background: #3a5fa0 !important; }
+
+  .key-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    pointer-events: none;
+  }
+
+  .key-arrow {
+    font-size: 20px;
+    color: #333;
+    line-height: 1;
+  }
+
+  .key-note {
+    font-size: 10px;
+    color: #888;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .key.black .key-label { display: none; }
+
+  .black-layer {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    pointer-events: none;
+  }
+
+  .octave-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .oct-btn {
+    background: transparent;
+    border: 1px solid #444;
+    color: #aaa;
+    padding: 6px 16px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.1s;
+  }
+
+  .oct-btn:hover {
+    border-color: #888;
+    color: #eee;
+  }
+
+  .oct-label {
+    font-size: 12px;
+    color: #555;
+    letter-spacing: 0.2em;
+    min-width: 80px;
+    text-align: center;
+  }
+
+  .hint {
+    font-size: 11px;
+    color: #444;
+    letter-spacing: 0.15em;
+    text-align: center;
+  }
+
+  .hint span {
+    color: #666;
+  }
+</style>
+</head>
+<body>
+
+<h1>Piano Keyboard</h1>
+
+<div class="note-display" id="noteDisplay">—</div>
+
+<div class="piano-wrap">
+  <div style="position:relative;">
+    <div class="white-keys" id="whiteKeys"></div>
+    <div class="black-layer" id="blackLayer"></div>
+  </div>
+</div>
+
+<div class="octave-controls">
+  <button class="oct-btn" onclick="changeOctave(-1)">− OCT</button>
+  <span class="oct-label" id="octLabel">OCTAVE 4</span>
+  <button class="oct-btn" onclick="changeOctave(1)">+ OCT</button>
+</div>
+
+<div class="hint">
+  <span>←</span> C &nbsp;·&nbsp;
+  <span>↑</span> D &nbsp;·&nbsp;
+  <span>→</span> E &nbsp;·&nbsp;
+  <span>↓</span> G &nbsp;·&nbsp;
+  <span>SPACE</span> A &nbsp;·&nbsp; click to play too
+</div>
+
+<script>
+const KEY_MAP = {
+  ArrowLeft:  { note: 'C',  label: '←' },
+  ArrowUp:    { note: 'D',  label: '↑' },
+  ArrowRight: { note: 'E',  label: '→' },
+  ArrowDown:  { note: 'G',  label: '↓' },
+  ' ':        { note: 'A',  label: 'SPACE' }
+};
+
+const WHITE_NOTES = ['C','D','E','F','G','A','B'];
+const BLACK_NOTES = [
+  { after: 0, name: 'C#' },
+  { after: 1, name: 'D#' },
+  { after: 3, name: 'F#' },
+  { after: 4, name: 'G#' },
+  { after: 5, name: 'A#' }
+];
+const MAPPED = ['C','D','E','G','A'];
+const WHITE_W = 70;
+const WHITE_GAP = 3;
+
+let octave = 4;
+const ctx = new (window.AudioContext || window.webkitAudioContext)();
+const activeNodes = {};
+const pressedKeys = new Set();
+
+function noteFreq(note, oct) {
+  const notes = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const n = notes.indexOf(note);
+  return 440 * Math.pow(2, (n + (oct - 4) * 12 - 9) / 12);
+}
+
+function playNote(note, oct) {
+  const key = note + oct;
+  if (activeNodes[key]) return;
+  ctx.resume();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.value = noteFreq(note, oct);
+  gain.gain.setValueAtTime(0.001, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime + 0.01);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  activeNodes[key] = { osc, gain };
+}
+
+function stopNote(note, oct) {
+  const key = note + oct;
+  if (!activeNodes[key]) return;
+  const { osc, gain } = activeNodes[key];
+  gain.gain.setValueAtTime(gain.gain.value, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+  osc.stop(ctx.currentTime + 0.25);
+  delete activeNodes[key];
+}
+
+function highlightKey(note, on) {
+  document.querySelectorAll('.key').forEach(k => {
+    if (k.dataset.note === note) k.classList.toggle('active', on);
+  });
+}
+
+function showNote(note) {
+  const d = document.getElementById('noteDisplay');
+  d.textContent = note ? note + octave : '—';
+}
+
+document.addEventListener('keydown', e => {
+  const m = KEY_MAP[e.key];
+  if (!m || pressedKeys.has(e.key)) return;
+  e.preventDefault();
+  pressedKeys.add(e.key);
+  playNote(m.note, octave);
+  highlightKey(m.note, true);
+  showNote(m.note);
+});
+
+document.addEventListener('keyup', e => {
+  const m = KEY_MAP[e.key];
+  if (!m) return;
+  e.preventDefault();
+  pressedKeys.delete(e.key);
+  stopNote(m.note, octave);
+  highlightKey(m.note, false);
+  if (pressedKeys.size === 0) showNote(null);
+});
+
+function changeOctave(d) {
+  octave = Math.max(2, Math.min(6, octave + d));
+  document.getElementById('octLabel').textContent = 'OCTAVE ' + octave;
+}
+
+function buildKeyboard() {
+  const wRow = document.getElementById('whiteKeys');
+  const bLayer = document.getElementById('blackLayer');
+  wRow.innerHTML = '';
+  bLayer.innerHTML = '';
+
+  WHITE_NOTES.forEach((n) => {
+    const k = document.createElement('div');
+    k.className = 'key';
+    k.dataset.note = n;
+    const kEntry = Object.values(KEY_MAP).find(m => m.note === n);
+    if (kEntry) {
+      k.innerHTML = `<div class="key-label"><span class="key-arrow">${kEntry.label}</span><span class="key-note">${n}</span></div>`;
+    } else {
+      k.innerHTML = `<div class="key-label"><span class="key-note">${n}</span></div>`;
+    }
+    k.addEventListener('mousedown', () => { playNote(n, octave); highlightKey(n, true); showNote(n); });
+    k.addEventListener('mouseup', () => { stopNote(n, octave); highlightKey(n, false); showNote(null); });
+    k.addEventListener('mouseleave', () => { stopNote(n, octave); highlightKey(n, false); });
+    wRow.appendChild(k);
+  });
+
+  BLACK_NOTES.forEach(b => {
+    const left = b.after * (WHITE_W + WHITE_GAP) + WHITE_W * 0.6;
+    const k = document.createElement('div');
+    k.className = 'key black';
+    k.dataset.note = b.name;
+    k.style.cssText = `position:absolute; left:${left}px; top:0; pointer-events:auto;`;
+    k.addEventListener('mousedown', (ev) => {
+      ev.stopPropagation();
+      playNote(b.name, octave);
+      k.classList.add('active');
+      showNote(b.name);
+    });
+    k.addEventListener('mouseup', () => { stopNote(b.name, octave); k.classList.remove('active'); showNote(null); });
+    k.addEventListener('mouseleave', () => { stopNote(b.name, octave); k.classList.remove('active'); });
+    bLayer.appendChild(k);
+  });
+}
+
+buildKeyboard();
+</script>
+</body>
+</html>
